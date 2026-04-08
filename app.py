@@ -1,20 +1,19 @@
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from typing import Optional
 import os
 
-# --- Configuration & Styles ---
+# --- Configuration ---
 st.set_page_config(page_title="SOW Intelligence Report", layout="wide")
 st.title("📄 SOW Extraction & Analysis Report")
 
-# --- Sidebar for API Keys ---
+# --- Sidebar for API Key ---
 with st.sidebar:
-    api_key = st.text_input("Enter OpenAI API Key", type="password")
-    os.environ["OPENAI_API_KEY"] = api_key
+    api_key = st.text_input("Enter Google Gemini API Key", type="password")
 
 # --- Pydantic model for structured extraction ---
 class SOWData(BaseModel):
@@ -28,25 +27,25 @@ class SOWData(BaseModel):
     is_signed: Optional[bool] = Field(None, description="Whether the contract is signed")
     ambiguities: Optional[str] = Field(None, description="Any ambiguities or risks found")
 
-def process_sow(uploaded_file):
+def process_sow(uploaded_file, key):
     with open("temp.pdf", "wb") as f:
         f.write(uploaded_file.getbuffer())
-    
+
     loader = PyPDFLoader("temp.pdf")
     pages = loader.load_and_split()
     full_text = " ".join([p.page_content for p in pages[:5]])
 
     parser = PydanticOutputParser(pydantic_object=SOWData)
-    
+
     prompt = PromptTemplate(
         template="Extract the following information from this Statement of Work document:\n{format_instructions}\n\nDocument:\n{text}\n",
         input_variables=["text"],
         partial_variables={"format_instructions": parser.get_format_instructions()}
     )
-    
-    llm = ChatOpenAI(temperature=0, model="gpt-4")
+
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=key, temperature=0)
     chain = prompt | llm | parser
-    
+
     return chain.invoke({"text": full_text})
 
 # --- UI Layout ---
@@ -54,18 +53,17 @@ uploaded_file = st.file_uploader("Upload SOW (PDF)", type="pdf")
 
 if uploaded_file and api_key:
     with st.spinner("Analyzing document..."):
-        result = process_sow(uploaded_file)
+        result = process_sow(uploaded_file, api_key)
         if not result:
-            st.error("Could not extract data from the document. Please check the PDF and try again.")
+            st.error("Could not extract data. Please check the PDF and try again.")
             st.stop()
         data = result.dict()
-        
-        rate = data.get("monthly_rate", 0)
+
+        rate = data.get("monthly_rate") or 0
         tcv = rate * 12
         acv = tcv
 
         col1, col2 = st.columns(2)
-
         with col1:
             st.subheader("📋 Contract Info")
             st.write(f"**Client:** {data.get('client_name')}")
@@ -83,14 +81,14 @@ if uploaded_file and api_key:
         col3, col4 = st.columns(2)
         with col3:
             st.subheader("🛠 Skills & Resources")
-            st.info(data.get("skills_required", "Not specified"))
+            st.info(data.get("skills_required") or "Not specified")
             st.write(f"**Resource Count:** {data.get('total_resources')}")
 
         with col4:
             st.subheader("⚖️ Compliance & Risk")
             status = "✅ Signed" if data.get("is_signed") else "❌ Unsigned"
             st.write(f"**Status:** {status}")
-            st.warning(f"**Ambiguities:** {data.get('ambiguities', 'None detected')}")
+            st.warning(f"**Ambiguities:** {data.get('ambiguities') or 'None detected'}")
 
 elif not api_key:
-    st.info("Please enter your API key in the sidebar to begin.")
+    st.info("Please enter your Gemini API key in the sidebar to begin.")
