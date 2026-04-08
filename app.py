@@ -1,7 +1,10 @@
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import ChatOpenAI
-from langchain.chains import create_extraction_chain
+from langchain.prompts import PromptTemplate
+from langchain.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+from typing import Optional
 import os
 
 # --- Configuration & Styles ---
@@ -13,21 +16,17 @@ with st.sidebar:
     api_key = st.text_input("Enter OpenAI API Key", type="password")
     os.environ["OPENAI_API_KEY"] = api_key
 
-# --- Structured Schema for Extraction ---
-schema = {
-    "properties": {
-        "client_name": {"type": "string"},
-        "vendor_name": {"type": "string"},
-        "start_date": {"type": "string"},
-        "end_date": {"type": "string"},
-        "total_resources": {"type": "integer"},
-        "monthly_rate": {"type": "number"},
-        "skills_required": {"type": "string"},
-        "is_signed": {"type": "boolean"},
-        "ambiguities": {"type": "string"},
-    },
-    "required": ["client_name", "vendor_name", "monthly_rate"],
-}
+# --- Pydantic model for structured extraction ---
+class SOWData(BaseModel):
+    client_name: Optional[str] = Field(None, description="Name of the client")
+    vendor_name: Optional[str] = Field(None, description="Name of the vendor")
+    start_date: Optional[str] = Field(None, description="Contract start date")
+    end_date: Optional[str] = Field(None, description="Contract end date")
+    total_resources: Optional[int] = Field(None, description="Total number of resources")
+    monthly_rate: Optional[float] = Field(None, description="Monthly rate in dollars")
+    skills_required: Optional[str] = Field(None, description="Skills required")
+    is_signed: Optional[bool] = Field(None, description="Whether the contract is signed")
+    ambiguities: Optional[str] = Field(None, description="Any ambiguities or risks found")
 
 def process_sow(uploaded_file):
     with open("temp.pdf", "wb") as f:
@@ -37,21 +36,29 @@ def process_sow(uploaded_file):
     pages = loader.load_and_split()
     full_text = " ".join([p.page_content for p in pages[:5]])
 
-    llm = ChatOpenAI(temperature=0, model="gpt-4")
-    chain = create_extraction_chain(schema, llm)
+    parser = PydanticOutputParser(pydantic_object=SOWData)
     
-    return chain.invoke(full_text)
+    prompt = PromptTemplate(
+        template="Extract the following information from this Statement of Work document:\n{format_instructions}\n\nDocument:\n{text}\n",
+        input_variables=["text"],
+        partial_variables={"format_instructions": parser.get_format_instructions()}
+    )
+    
+    llm = ChatOpenAI(temperature=0, model="gpt-4")
+    chain = prompt | llm | parser
+    
+    return chain.invoke({"text": full_text})
 
 # --- UI Layout ---
 uploaded_file = st.file_uploader("Upload SOW (PDF)", type="pdf")
 
 if uploaded_file and api_key:
     with st.spinner("Analyzing document..."):
-        results = process_sow(uploaded_file)
-        if not results:
+        result = process_sow(uploaded_file)
+        if not result:
             st.error("Could not extract data from the document. Please check the PDF and try again.")
             st.stop()
-        data = results[0]
+        data = result.dict()
         
         rate = data.get("monthly_rate", 0)
         tcv = rate * 12
