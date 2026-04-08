@@ -53,11 +53,15 @@ uploaded_file = st.file_uploader("Upload SOW (PDF)", type="pdf")
 
 if uploaded_file and api_key:
     with st.spinner("Analyzing document..."):
-        result = process_sow(uploaded_file, api_key)
-        if not result:
-            st.error("Could not extract data. Please check the PDF and try again.")
+        try:
+            result = process_sow(uploaded_file, api_key)
+            if not result:
+                st.error("Could not extract data. Please check the PDF and try again.")
+                st.stop()
+            data = result.dict()
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
             st.stop()
-        data = result.dict()
 
         rate = data.get("monthly_rate") or 0
         tcv = rate * 12
