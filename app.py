@@ -43,7 +43,7 @@ def process_sow(uploaded_file, key):
         partial_variables={"format_instructions": parser.get_format_instructions()}
     )
 
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=key, temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=key, temperature=0)
     chain = prompt | llm | parser
 
     return chain.invoke({"text": full_text})
